@@ -348,23 +348,9 @@ void mpu_configure_region(uintptr_t base, size_t size,
   uint8_t      subregions;
   uintptr_t    alignedbase;
 
-  /* Ensure the base address alignment
-   *
-   * ARMv7-M Architecture Reference Manual
-   * B3.5.8 MPU Region Base Address Register, MPU_RBAR
-   * "Software must ensure that the value written to the ADDR field
-   * aligns with the size of the selected region."
-   */
+  /* Make sure the base address is aligned to the size of the region */
 
-  alignedbase  = base & MPU_RBAR_ADDR_MASK;
-  l2size       = mpu_log2regionceil(size + base - alignedbase);
-  alignedbase &= ~((1 << l2size) - 1);
-  l2size       = mpu_log2regionceil(size + base - alignedbase);
-
-  DEBUGASSERT(alignedbase + (1 << l2size) >= base + size);
-  DEBUGASSERT(l2size == 5 || alignedbase + (1 << (l2size - 1)) < base + size);
-  DEBUGASSERT((alignedbase & MPU_RBAR_ADDR_MASK) == alignedbase);
-  DEBUGASSERT((alignedbase & ((1 << l2size) - 1)) == 0);
+  alignedbase = mpu_check_alignment(base, size);
 
   /* Select the region */
 
@@ -372,7 +358,7 @@ void mpu_configure_region(uintptr_t base, size_t size,
 
   /* Select the region base address */
 
-  putreg32(alignedbase | region | MPU_RBAR_VALID, MPU_RBAR);
+  putreg32((alignedbase & MPU_RBAR_ADDR_MASK) | region | MPU_RBAR_VALID, MPU_RBAR);
 
   /* Select the region size and the sub-region map */
 
@@ -386,3 +372,57 @@ void mpu_configure_region(uintptr_t base, size_t size,
            flags;
   putreg32(regval, MPU_RASR);
 }
+
+/*****************************************************************************
+ * Name: mpu_check_alignment
+ *
+ * Description:
+ *   Make sure the base address is aligned to the size of the region
+ *
+ *****************************************************************************/
+
+#define IS_POWER_OF_TWO(x) (((x) & ((x) - 1)) == 0)
+#define IS_ALIGNED_TO(x, n) (((x) & ((1 << (n)) - 1)) == 0)
+#define ALIGN_TO(x, n) ((x) & ~((1 << (n)) - 1))
+
+uintptr_t mpu_check_alignment(uintptr_t base, size_t size)
+{
+  uintptr_t alignedbase;
+  uintptr_t alignedend;
+  size_t subregionsize;
+
+  /* Calculate the minimum power-of-two region size that contains size. */
+
+  uint8_t l2size = mpu_log2regionceil(size);
+
+  /* If the region size is a power-of-two, and base address is aligned to
+     the size, then just return, no sub-regions are necessary. */
+
+  if (IS_POWER_OF_TWO(size) && IS_ALIGNED_TO(base, l2size))
+    return base;
+
+  /* If the region size is not a power-of-two, or not aligned to the base
+     address then we can try re-aligning the base address to the nearest 
+     valid alignment for this region size. */
+
+  alignedbase = ALIGN_TO(base, l2size);
+
+  /* Check that the region size is a multiple of the sub-region size, and
+    that the new region starting from the aligned base actually contains
+    the unaligned region. */
+
+  alignedend = alignedbase + (1 << l2size);
+  subregionsize = 1 << mpu_log2regionceil((1 << l2size) / MPU_N_SUBREGIONS);
+  if ((size % subregionsize == 0) && (alignedbase <= base) &&
+     (alignedend >= base+size))
+    return alignedbase;
+
+  /* Else we do not have a valid MPU mapping, alert the user and abort. */
+
+  _alert("Invalid MPU region, please check the address alignment and size\n");
+  PANIC();
+}
+
+#undef IS_POWER_OF_TWO
+#undef IS_ALIGNED_TO
+#undef ALIGN_TO

@@ -132,6 +132,8 @@
 #    define MPU_RASR_AP_RORO    (6 << MPU_RASR_AP_SHIFT)  /* P:RO   U:RO   */
 #  define MPU_RASR_XN           (1 << 28)                 /* Bit 28: Instruction access disable */
 
+#define MPU_N_SUBREGIONS 8
+
 #ifdef CONFIG_ARM_MPU
 
 /*********************************************************************************************
@@ -220,6 +222,16 @@ void mpu_control(bool enable, bool hfnmiena, bool privdefena);
 
 void mpu_configure_region(uintptr_t base, size_t size,
                                         uint32_t flags);
+
+/*********************************************************************************************
+ * Name: mpu_check_alignment
+ *
+ * Description:
+ *   Make sure the base address is aligned to the size of the region
+ *
+ *********************************************************************************************/
+
+uintptr_t mpu_check_alignment(uintptr_t base, size_t size);
 
 /*********************************************************************************************
  * Inline Functions
